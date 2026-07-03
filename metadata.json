@@ -1,0 +1,6 @@
+{
+  "name": "Ficha de Pokérole",
+  "description": "Ficha de personagem e gerenciador de Pokémon para o sistema de RPG Pokérole 3.0.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
