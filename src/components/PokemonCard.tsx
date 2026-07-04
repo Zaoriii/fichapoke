@@ -1,8 +1,61 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Pokemon, BoxPokemon, PokemonGolpe } from "../types";
-import { MARKS_DATA, NATURES_DATA, TYPES_DATA, ITEMS_DATA, PK_MOVES, PK_ABILITIES } from "../data";
+import { MARKS_DATA, TYPES_DATA, ITEMS_DATA, PK_MOVES, PK_ABILITIES } from "../data";
 import { pkCalc, rollPool, jr, encMon9, dy } from "../utils";
-import { Shield, Sparkles, BookOpen, Trash2, ArrowUpCircle, CheckCircle2, ChevronUp, ChevronDown } from "lucide-react";
+import { Shield, Sparkles, BookOpen, Trash2, ArrowUpCircle, CheckCircle2, ChevronUp, ChevronDown, Search } from "lucide-react";
+import { fetchAutofillForSpecies, PokeroleAutofillResult } from "../pokeroleApi";
+
+// Fillable dot rating (bolinhas), used for attributes, skills, contest stats etc.
+export interface DotRatingProps {
+  value: number;
+  max: number;
+  min?: number;
+  onChange: (val: number) => void;
+  size?: number;
+}
+
+export function DotRating({ value, max, min = 0, onChange, size = 16 }: DotRatingProps) {
+  const current = Number(value) || 0;
+  const dots = [];
+  for (let i = 1; i <= max; i++) {
+    const filled = i <= current;
+    dots.push(
+      <button
+        key={i}
+        type="button"
+        className={"dot" + (filled ? " filled" : "")}
+        style={{ width: size, height: size }}
+        title={String(i)}
+        onClick={() => {
+          const next = current === i ? Math.max(min, i - 1) : i;
+          onChange(next);
+        }}
+      />
+    );
+  }
+  return <div className="dot-row">{dots}</div>;
+}
+
+export function DotStat({
+  label,
+  value,
+  max,
+  min = 0,
+  onChange
+}: {
+  label: string;
+  value: number;
+  max: number;
+  min?: number;
+  onChange: (val: number) => void;
+}) {
+  return (
+    <div className="dot-stat">
+      <div className="dot-stat-label">{label}</div>
+      <DotRating value={value} max={max} min={min} onChange={onChange} />
+    </div>
+  );
+}
 
 // Autocomplete Component
 interface AutocompleteProps {
@@ -346,6 +399,60 @@ export function ExportModal({ mon, onClose }: { mon: any; onClose: () => void })
   );
 }
 
+// Botão que busca dados da espécie no dataset Pokerole-Data (mesma fonte do PokéroleDex)
+// e aplica Tipo, Habilidade, Atributos base e Golpes iniciais na ficha.
+export function PokeroleAutofillButton({
+  speciesName,
+  onApply
+}: {
+  speciesName: string;
+  onApply: (result: PokeroleAutofillResult) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleClick = async () => {
+    const name = (speciesName || "").trim();
+    if (!name) {
+      setError("Preencha o nome da espécie primeiro.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetchAutofillForSpecies(name);
+      if (!result) {
+        setError(`"${name}" não encontrado no dataset Pokerole-Data.`);
+        return;
+      }
+      const proceed = window.confirm(
+        `Preencher Tipo, Habilidade, Atributos base e Golpes iniciais de "${name}" com dados do Pokerole-Data?\n\nIsso vai sobrescrever o que já estiver preenchido nesses campos.`
+      );
+      if (proceed) onApply(result);
+    } catch (e: any) {
+      setError(e?.message || "Erro ao buscar dados. Verifique sua conexão.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <button
+        type="button"
+        className="btn-ghost"
+        style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}
+        onClick={handleClick}
+        disabled={loading}
+      >
+        <Search size={12} />
+        {loading ? "Buscando..." : "Autopreencher (Pokérole-Data)"}
+      </button>
+      {error && <span style={{ fontSize: 10, color: "#c0392b" }}>{error}</span>}
+    </div>
+  );
+}
+
 // Dynamic image fetcher component
 export function PokeImage({ name, className }: { name: string; className?: string }) {
   const [src, setSrc] = useState<string | null>(null);
@@ -477,6 +584,21 @@ export function ActivePokemonCard({
     onUpdate(updated);
   };
 
+  const handlePokeroleAutofill = (r: PokeroleAutofillResult) => {
+    onUpdate({
+      tipo1: r.tipo1 || mon.tipo1,
+      tipo2: r.tipo2 || mon.tipo2,
+      baseHP: r.baseHP || mon.baseHP,
+      habilidade: r.habilidade || mon.habilidade,
+      atributos: { ...mon.atributos, ...r.atributos },
+      golpes: r.golpes.length
+        ? r.golpes.map(g => ({ nome: g.nome, poder: g.poder, tipo: g.tipo, punteria: g.punteria, dano: g.dano, efeito: g.efeito }))
+        : mon.golpes,
+      tamanho: r.tamanho || mon.tamanho,
+      peso: r.peso || mon.peso
+    });
+  };
+
   const statFields = ["hp", "atk", "def", "spatk", "spdef", "spd"];
   const bstTotal = statFields.reduce((sum, f) => sum + (Number(mon.baseStats[f as keyof typeof mon.baseStats]) || 0), 0);
 
@@ -487,7 +609,7 @@ export function ActivePokemonCard({
       <div className={"mon-card" + (mon.pronto ? " ready-outline" : "")}>
         <div className="mon-head" onClick={toggleExpand}>
           <div className="mon-img-wrap">
-            <PokeImage name={mon.especie || mon.nome} />
+            <PokeImage name={mon.nome} />
           </div>
           <div className="mon-head-info">
             <input
@@ -530,6 +652,7 @@ export function ActivePokemonCard({
         {isExpanded && (
           <React.Fragment>
             <div style={{ padding: "8px 14px 0", display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <PokeroleAutofillButton speciesName={mon.nome} onApply={handlePokeroleAutofill} />
               <button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => setBotOpen(true)}>
                 📋 Colar do Bot
               </button>
@@ -557,15 +680,7 @@ export function ActivePokemonCard({
             <div className="mon-body">
               {tab === "perfil" && (
                 <React.Fragment>
-                  <div className="grid grid-4">
-                    <div className="field">
-                      <label>Gênero</label>
-                      <select value={mon.genero} onChange={e => onUpdate({ genero: e.target.value })}>
-                        <option value="Macho">Macho</option>
-                        <option value="Fêmea">Fêmea</option>
-                        <option value="Indefinido">Indefinido</option>
-                      </select>
-                    </div>
+                  <div className="grid grid-3">
                     <div className="field">
                       <label>Tipo 1</label>
                       <select value={mon.tipo1} onChange={e => onUpdate({ tipo1: e.target.value })}>
@@ -591,23 +706,7 @@ export function ActivePokemonCard({
 
                   <div className="grid grid-2">
                     <div className="field">
-                      <label>Espécie</label>
-                      <input
-                        type="text"
-                        placeholder="Ex: Pikachu"
-                        value={mon.especie || ""}
-                        onChange={e => onUpdate({ especie: e.target.value })}
-                      />
-                    </div>
-                    <div className="field">
-                      <label>Base HP (Espécie)</label>
-                      <input type="number" value={mon.baseHP} onChange={e => onUpdate({ baseHP: Number(e.target.value) || 4 })} />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-2">
-                    <div className="field">
-                      <label>Rank</label>
+                      <label>Rec. Rank</label>
                       <select value={mon.rank || "Starter"} onChange={e => onUpdate({ rank: e.target.value })}>
                         <option value="Starter">Starter</option>
                         <option value="Beginner">Beginner</option>
@@ -618,72 +717,13 @@ export function ActivePokemonCard({
                       </select>
                     </div>
                     <div className="field">
-                      <label>Nature</label>
-                      <select value={mon.nature} onChange={e => onUpdate({ nature: e.target.value })}>
-                        <option value="">—</option>
-                        {NATURES_DATA.map(n => <option key={n} value={n}>{n}</option>)}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-2">
-                    <div className="field">
-                      <label>Poké Ball</label>
-                      <SoAutocomplete
-                        value={mon.pokebola}
-                        options={ITEMS_DATA.filter(i => i.cat === "Pokébola")}
-                        getLabel={i => i.name}
-                        getSub={i => i.desc || ""}
-                        placeholder="Buscar Poké Ball..."
-                        onChange={val => onUpdate({ pokebola: val })}
-                        onPick={item => onUpdate({ pokebola: item.name })}
-                      />
-                    </div>
-                    <div className="field">
-                      <label>Item Segurado</label>
-                      <SoAutocomplete
-                        value={mon.itemSegurado}
-                        options={ITEMS_DATA}
-                        getLabel={i => i.name}
-                        getSub={i => i.cat}
-                        placeholder="Buscar Item..."
-                        onChange={val => onUpdate({ itemSegurado: val })}
-                        onPick={item => onUpdate({ itemSegurado: item.name })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-3">
-                    <div className="field">
-                      <label>Felicidade</label>
-                      <input type="number" value={mon.felicidade} onChange={e => onUpdate({ felicidade: Number(e.target.value) || 0 })} />
-                    </div>
-                    <div className="field" style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#6b6354" }}>
-                        <input
-                          type="checkbox"
-                          style={{ width: "auto" }}
-                          checked={mon.megaShinka}
-                          onChange={e => onUpdate({ megaShinka: e.target.checked, battleBond: e.target.checked ? false : mon.battleBond })}
-                        />
-                        Mega Shinka
-                      </label>
-                    </div>
-                    <div className="field" style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#6b6354" }}>
-                        <input
-                          type="checkbox"
-                          style={{ width: "auto" }}
-                          checked={mon.battleBond}
-                          onChange={e => onUpdate({ battleBond: e.target.checked, megaShinka: e.target.checked ? false : mon.megaShinka })}
-                        />
-                        Battle Bond
-                      </label>
+                      <label>Base HP</label>
+                      <input type="number" value={mon.baseHP} onChange={e => onUpdate({ baseHP: Number(e.target.value) || 4 })} />
                     </div>
                   </div>
 
                   <div className="field">
-                    <label>Habilidade</label>
+                    <label>Abilities</label>
                     <SoAutocomplete
                       value={mon.habilidade}
                       options={PK_ABILITIES}
@@ -695,70 +735,19 @@ export function ActivePokemonCard({
                     />
                   </div>
 
-                  <div className="section-sub">Informações Físicas e Sociais</div>
                   <div className="grid grid-3">
                     <div className="field">
-                      <label>Tamanho</label>
+                      <label>Height</label>
                       <input type="text" value={mon.tamanho || ""} onChange={e => onUpdate({ tamanho: e.target.value })} placeholder="Ex: 0.4 m" />
                     </div>
                     <div className="field">
-                      <label>Peso</label>
+                      <label>Weight</label>
                       <input type="text" value={mon.peso || ""} onChange={e => onUpdate({ peso: e.target.value })} placeholder="Ex: 6.0 kg" />
                     </div>
                     <div className="field">
-                      <label>Lealdade</label>
-                      <input type="number" min={0} max={6} value={mon.lealdade ?? 3} onChange={e => onUpdate({ lealdade: Number(e.target.value) || 0 })} />
+                      <label>Evoluções</label>
+                      <input type="text" value={mon.evolucoes || ""} onChange={e => onUpdate({ evolucoes: e.target.value })} placeholder="Ex: Evolui p/ X (Nv. 16)" />
                     </div>
-                  </div>
-
-                  <div className="grid grid-3">
-                    <div className="field">
-                      <label>Lazo Batalla</label>
-                      <input type="text" value={mon.lazoBatalla || ""} onChange={e => onUpdate({ lazoBatalla: e.target.value })} placeholder="Nome do Lazo" />
-                    </div>
-                    <div className="field">
-                      <label>Puntos Entrenamiento</label>
-                      <input type="number" min={0} value={mon.puntosEntrenamiento ?? 0} onChange={e => onUpdate({ puntosEntrenamiento: Number(e.target.value) || 0 })} />
-                    </div>
-                    <div className="field">
-                      <label>Instinto / Lógica</label>
-                      <select value={mon.instintoLogica || "Instinto"} onChange={e => onUpdate({ instintoLogica: e.target.value })}>
-                        <option value="Instinto">Instinto</option>
-                        <option value="Lógica">Lógica</option>
-                        <option value="Ambos">Ambos</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="field">
-                    <label>Acessórios</label>
-                    <input type="text" value={mon.accesorios || ""} onChange={e => onUpdate({ accesorios: e.target.value })} placeholder="Ex: Laço Vermelho, Óculos" />
-                  </div>
-
-                  <div className="section-sub">Ranuras de Bolsa (Mochila do Pokémon)</div>
-                  <div className="grid grid-2">
-                    {[0, 1, 2, 3].map(idx => (
-                      <div className="field" key={idx}>
-                        <label>Slot {idx + 1}</label>
-                        <SoAutocomplete
-                          value={mon.ranurasBolsa?.[idx] || ""}
-                          options={ITEMS_DATA}
-                          getLabel={i => i.name}
-                          getSub={i => i.cat}
-                          placeholder={`Item da Bolsa ${idx + 1}...`}
-                          onChange={val => {
-                            const bag = [...(mon.ranurasBolsa || ["", "", "", ""])];
-                            bag[idx] = val;
-                            onUpdate({ ranurasBolsa: bag });
-                          }}
-                          onPick={item => {
-                            const bag = [...(mon.ranurasBolsa || ["", "", "", ""])];
-                            bag[idx] = item.name;
-                            onUpdate({ ranurasBolsa: bag });
-                          }}
-                        />
-                      </div>
-                    ))}
                   </div>
                 </React.Fragment>
               )}
@@ -768,17 +757,14 @@ export function ActivePokemonCard({
                   <div className="section-sub">Atributos Pokérole 3.0</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6 }}>
                     {["strength", "dexterity", "vitality", "special", "insight"].map(k => (
-                      <div className="stat-pill" key={k}>
-                        <input
-                          type="number"
-                          min={0}
-                          max={8}
-                          style={{ textAlign: "center", border: "none", padding: 0, fontWeight: 700, fontSize: 15 }}
-                          value={mon.atributos?.[k as keyof typeof mon.atributos] ?? 1}
-                          onChange={e => onUpdate({ atributos: { ...mon.atributos, [k]: Number(e.target.value) || 0 } })}
-                        />
-                        <div className="l">{k.toUpperCase()}</div>
-                      </div>
+                      <DotStat
+                        key={k}
+                        label={k.toUpperCase()}
+                        value={mon.atributos?.[k as keyof typeof mon.atributos] ?? 1}
+                        max={8}
+                        min={0}
+                        onChange={val => onUpdate({ atributos: { ...mon.atributos, [k]: val } })}
+                      />
                     ))}
                   </div>
 
@@ -1021,6 +1007,21 @@ export function BoxPokemonCard({
     onUpdate(updated);
   };
 
+  const handlePokeroleAutofill = (r: PokeroleAutofillResult) => {
+    onUpdate({
+      tipo1: r.tipo1 || mon.tipo1,
+      tipo2: r.tipo2 || mon.tipo2,
+      baseHP: r.baseHP || mon.baseHP,
+      habilidade: r.habilidade || mon.habilidade,
+      atributos: { ...mon.atributos, ...r.atributos },
+      golpes: r.golpes.length
+        ? r.golpes.map(g => ({ nome: g.nome, poder: g.poder, tipo: g.tipo, punteria: g.punteria, dano: g.dano, efeito: g.efeito }))
+        : mon.golpes,
+      tamanho: r.tamanho || mon.tamanho,
+      peso: r.peso || mon.peso
+    });
+  };
+
   const statFields = ["hp", "atk", "def", "spatk", "spdef", "spd"];
   const bstTotal = statFields.reduce((sum, f) => sum + (Number(mon.baseStats[f as keyof typeof mon.baseStats]) || 0), 0);
 
@@ -1099,21 +1100,16 @@ export function BoxPokemonCard({
                     <div className="field">
                       <label>Espécie</label>
                       <input type="text" value={mon.especie} onChange={e => onUpdate({ especie: e.target.value })} />
+                      <div style={{ marginTop: 6 }}>
+                        <PokeroleAutofillButton speciesName={mon.especie} onApply={handlePokeroleAutofill} />
+                      </div>
                     </div>
                     <div className="field">
                       <label>Base HP (Espécie)</label>
                       <input type="number" value={mon.baseHP ?? 4} onChange={e => onUpdate({ baseHP: Number(e.target.value) || 4 })} />
                     </div>
                   </div>
-                  <div className="grid grid-4">
-                    <div className="field">
-                      <label>Gênero</label>
-                      <select value={mon.genero} onChange={e => onUpdate({ genero: e.target.value })}>
-                        <option value="Macho">Macho</option>
-                        <option value="Fêmea">Fêmea</option>
-                        <option value="Indefinido">Indefinido</option>
-                      </select>
-                    </div>
+                  <div className="grid grid-3">
                     <div className="field">
                       <label>Tipo 1</label>
                       <select value={mon.tipo1} onChange={e => onUpdate({ tipo1: e.target.value })}>
@@ -1137,60 +1133,8 @@ export function BoxPokemonCard({
                     </div>
                   </div>
 
-                  <div className="grid grid-4">
-                    <div className="field">
-                      <label>Total (0–500)</label>
-                      <input type="number" value={mon.total} onChange={e => onUpdate({ total: Number(e.target.value) || 500 })} />
-                    </div>
-                    <div className="field">
-                      <label>Nature</label>
-                      <select value={mon.nature} onChange={e => onUpdate({ nature: e.target.value })}>
-                        <option value="">—</option>
-                        {NATURES_DATA.map(n => <option key={n} value={n}>{n}</option>)}
-                      </select>
-                    </div>
-                    <div className="field">
-                      <label>IVs</label>
-                      <select value={mon.ivs} onChange={e => onUpdate({ ivs: Number(e.target.value) })}>
-                        <option value={31}>31 (perfeito)</option>
-                        <option value={0}>0</option>
-                      </select>
-                    </div>
-                    <div className="field">
-                      <label>Felicidade</label>
-                      <input type="number" value={mon.felicidade} onChange={e => onUpdate({ felicidade: Number(e.target.value) || 0 })} />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-2">
-                    <div className="field">
-                      <label>Poké Ball</label>
-                      <SoAutocomplete
-                        value={mon.pokebola}
-                        options={ITEMS_DATA.filter(i => i.cat === "Pokébola")}
-                        getLabel={i => i.name}
-                        getSub={i => i.desc || ""}
-                        placeholder="Buscar Poké Ball..."
-                        onChange={val => onUpdate({ pokebola: val })}
-                        onPick={item => onUpdate({ pokebola: item.name })}
-                      />
-                    </div>
-                    <div className="field">
-                      <label>Item Segurado</label>
-                      <SoAutocomplete
-                        value={mon.itemSegurado}
-                        options={ITEMS_DATA}
-                        getLabel={i => i.name}
-                        getSub={i => i.cat}
-                        placeholder="Buscar Item..."
-                        onChange={val => onUpdate({ itemSegurado: val })}
-                        onPick={item => onUpdate({ itemSegurado: item.name })}
-                      />
-                    </div>
-                  </div>
-
                   <div className="field">
-                    <label>Habilidade</label>
+                    <label>Abilities</label>
                     <SoAutocomplete
                       value={mon.habilidade}
                       options={PK_ABILITIES}
@@ -1202,70 +1146,19 @@ export function BoxPokemonCard({
                     />
                   </div>
 
-                  <div className="section-sub">Informações Físicas e Sociais</div>
                   <div className="grid grid-3">
                     <div className="field">
-                      <label>Tamanho</label>
+                      <label>Height</label>
                       <input type="text" value={mon.tamanho || ""} onChange={e => onUpdate({ tamanho: e.target.value })} placeholder="Ex: 0.4 m" />
                     </div>
                     <div className="field">
-                      <label>Peso</label>
+                      <label>Weight</label>
                       <input type="text" value={mon.peso || ""} onChange={e => onUpdate({ peso: e.target.value })} placeholder="Ex: 6.0 kg" />
                     </div>
                     <div className="field">
-                      <label>Lealdade</label>
-                      <input type="number" min={0} max={6} value={mon.lealdade ?? 3} onChange={e => onUpdate({ lealdade: Number(e.target.value) || 0 })} />
+                      <label>Evoluções</label>
+                      <input type="text" value={mon.evolucoes || ""} onChange={e => onUpdate({ evolucoes: e.target.value })} placeholder="Ex: Evolui p/ X (Nv. 16)" />
                     </div>
-                  </div>
-
-                  <div className="grid grid-3">
-                    <div className="field">
-                      <label>Lazo Batalla</label>
-                      <input type="text" value={mon.lazoBatalla || ""} onChange={e => onUpdate({ lazoBatalla: e.target.value })} placeholder="Nome do Lazo" />
-                    </div>
-                    <div className="field">
-                      <label>Puntos Entrenamiento</label>
-                      <input type="number" min={0} value={mon.puntosEntrenamiento ?? 0} onChange={e => onUpdate({ puntosEntrenamiento: Number(e.target.value) || 0 })} />
-                    </div>
-                    <div className="field">
-                      <label>Instinto / Lógica</label>
-                      <select value={mon.instintoLogica || "Instinto"} onChange={e => onUpdate({ instintoLogica: e.target.value })}>
-                        <option value="Instinto">Instinto</option>
-                        <option value="Lógica">Lógica</option>
-                        <option value="Ambos">Ambos</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="field">
-                    <label>Acessórios</label>
-                    <input type="text" value={mon.accesorios || ""} onChange={e => onUpdate({ accesorios: e.target.value })} placeholder="Ex: Laço Vermelho, Óculos" />
-                  </div>
-
-                  <div className="section-sub">Ranuras de Bolsa (Mochila do Pokémon)</div>
-                  <div className="grid grid-2">
-                    {[0, 1, 2, 3].map(idx => (
-                      <div className="field" key={idx}>
-                        <label>Slot {idx + 1}</label>
-                        <SoAutocomplete
-                          value={mon.ranurasBolsa?.[idx] || ""}
-                          options={ITEMS_DATA}
-                          getLabel={i => i.name}
-                          getSub={i => i.cat}
-                          placeholder={`Item da Bolsa ${idx + 1}...`}
-                          onChange={val => {
-                            const bag = [...(mon.ranurasBolsa || ["", "", "", ""])];
-                            bag[idx] = val;
-                            onUpdate({ ranurasBolsa: bag });
-                          }}
-                          onPick={item => {
-                            const bag = [...(mon.ranurasBolsa || ["", "", "", ""])];
-                            bag[idx] = item.name;
-                            onUpdate({ ranurasBolsa: bag });
-                          }}
-                        />
-                      </div>
-                    ))}
                   </div>
                 </React.Fragment>
               )}
@@ -1275,17 +1168,14 @@ export function BoxPokemonCard({
                   <div className="section-sub">Atributos Pokérole 3.0</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6 }}>
                     {["strength", "dexterity", "vitality", "special", "insight"].map(k => (
-                      <div className="stat-pill" key={k}>
-                        <input
-                          type="number"
-                          min={0}
-                          max={8}
-                          style={{ textAlign: "center", border: "none", padding: 0, fontWeight: 700, fontSize: 15 }}
-                          value={mon.atributos?.[k as keyof typeof mon.atributos] ?? 1}
-                          onChange={e => onUpdate({ atributos: { ...mon.atributos, [k]: Number(e.target.value) || 0 } })}
-                        />
-                        <div className="l">{k.toUpperCase()}</div>
-                      </div>
+                      <DotStat
+                        key={k}
+                        label={k.toUpperCase()}
+                        value={mon.atributos?.[k as keyof typeof mon.atributos] ?? 1}
+                        max={8}
+                        min={0}
+                        onChange={val => onUpdate({ atributos: { ...mon.atributos, [k]: val } })}
+                      />
                     ))}
                   </div>
 
@@ -1380,6 +1270,10 @@ export function BoxPokemonCard({
                   </div>
 
                   <div className="section-sub">Status Base do Pokémon (BST)</div>
+                  <div className="field" style={{ maxWidth: 160, marginBottom: 6 }}>
+                    <label>Total (0–500)</label>
+                    <input type="number" value={mon.total} onChange={e => onUpdate({ total: Number(e.target.value) || 500 })} />
+                  </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 6 }}>
                     {statFields.map(f => (
                       <div className="stat-pill" key={f}>
