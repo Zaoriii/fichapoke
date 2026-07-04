@@ -16,6 +16,49 @@ export interface ConquistaItem {
   foto: string | null;
 }
 
+// Skills do Treinador seguindo o layout oficial da ficha Pokérole,
+// agrupadas por categoria: Luta, Sobrevivência, Social e Conhecimento.
+export interface TreinadorSkills {
+  // Luta (Fight)
+  brawl: number;
+  channel: number;
+  clash: number;
+  evasion: number;
+  // Sobrevivência (Survival)
+  alert: number;
+  athletic: number;
+  nature_skill: number;
+  stealth: number;
+  // Social
+  empathy: number;
+  etiquette: number;
+  intimidate: number;
+  perform: number;
+  // Conhecimento (Knowledge)
+  crafts: number;
+  lore: number;
+  medicine: number;
+  science: number;
+}
+
+export interface ContestStats {
+  tough: number;
+  cool: number;
+  beauty: number;
+  cute: number;
+  clever: number;
+}
+
+export interface AchievementItem {
+  texto: string;
+  feito: boolean;
+}
+
+export interface ExtraStat {
+  label: string;
+  value: number;
+}
+
 export interface Treinador {
   nome: string;
   classe: string;
@@ -26,13 +69,13 @@ export interface Treinador {
   foto: string | null;
   rotomImg: string | null;
   atributos: AtributosTreinador;
-  skills: PokemonSkills;
-  habilidadeTreinador: Habilidade;
-  habilidadesClasse: Habilidade[];
-  insignias: (string | ConquistaItem)[];
-  fitas: (string | ConquistaItem)[];
-  broches: (string | ConquistaItem)[];
-  chaves: (string | ConquistaItem)[];
+  skills: TreinadorSkills;
+  contestStats: ContestStats;
+  nature: string;
+  concept: string;
+  achievements: AchievementItem[];
+  badges: (string | ConquistaItem)[];
+  extra: ExtraStat[];
   background: string;
 }
 
@@ -128,6 +171,7 @@ export interface Pokemon {
   beleza?: number;
   dulzura?: number;
   ingenio?: number;
+  evolucoes?: string;
   expanded?: boolean;
 }
 
@@ -179,6 +223,7 @@ export interface BoxPokemon {
   beleza?: number;
   dulzura?: number;
   ingenio?: number;
+  evolucoes?: string;
   expanded?: boolean;
 }
 
